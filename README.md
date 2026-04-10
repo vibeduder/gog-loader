@@ -2,7 +2,7 @@
 
 GOG Loader is a small Desktop Electron app for browsing your GOG library and downloading local backups of your games. It authenticates against GOG, shows your owned titles in a browser UI, and downloads installers plus bonus content into a local directory.
 
-![GOG Loader app screenshot](screenshots/main.png)
+![GOG Loader app screenshot](assets/screenshot.png)
 
 ## What It Does
 
