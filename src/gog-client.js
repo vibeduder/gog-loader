@@ -15,6 +15,7 @@ class GogClient {
   constructor(tokenFile) {
     this.tokenFile = tokenFile;
     this.token = null;
+    this.refreshPromise = null;
   }
 
   static authURL() {
@@ -37,15 +38,13 @@ class GogClient {
     const data = await fsp.readFile(this.tokenFile, 'utf8');
     this.token = JSON.parse(data);
 
-    if (!this.token.expires_at || !this.token.refresh_token) return;
-
-    const expiresAt = new Date(this.token.expires_at).getTime();
-    if (Date.now() > expiresAt - 5 * 60 * 1000) {
-      await this.refreshToken();
-    }
+    await this.ensureValidToken();
   }
 
   async setToken(t) {
+    if (!t.refresh_token && this.token?.refresh_token) {
+      t.refresh_token = this.token.refresh_token;
+    }
     if (!t.expires_at && t.expires_in) {
       t.expires_at = new Date(Date.now() + t.expires_in * 1000).toISOString();
     }
@@ -78,6 +77,25 @@ class GogClient {
       refresh_token: this.token.refresh_token,
     });
     await this._fetchToken(params);
+  }
+
+  async ensureValidToken({ forceRefresh = false } = {}) {
+    if (!this.token?.access_token) return;
+    if (!forceRefresh && this.isAuthenticated()) return;
+    if (!this.token.refresh_token) {
+      if (forceRefresh) throw new Error('no refresh token available');
+      return;
+    }
+    await this._refreshTokenSingleFlight();
+  }
+
+  async _refreshTokenSingleFlight() {
+    if (!this.refreshPromise) {
+      this.refreshPromise = this.refreshToken().finally(() => {
+        this.refreshPromise = null;
+      });
+    }
+    return this.refreshPromise;
   }
 
   async _fetchToken(params) {
@@ -146,12 +164,10 @@ class GogClient {
   }
 
   async resolveDownlink(downlink) {
-    const headers = { Accept: 'application/json' };
-    if (this.token?.access_token) {
-      headers.Authorization = `Bearer ${this.token.access_token}`;
-    }
-
-    const resp = await fetch(downlink, { headers, redirect: 'manual' });
+    const resp = await this._fetchAuthed(downlink, {
+      headers: { Accept: 'application/json' },
+      redirect: 'manual',
+    });
 
     let cdnURL;
     if ([301, 302, 307, 308].includes(resp.status)) {
@@ -235,14 +251,33 @@ class GogClient {
   }
 
   async _getJSON(url) {
-    const headers = { Accept: 'application/json' };
-    if (this.token?.access_token) {
-      headers.Authorization = `Bearer ${this.token.access_token}`;
-    }
-    const resp = await fetch(url, { headers });
+    const resp = await this._fetchAuthed(url, { headers: { Accept: 'application/json' } });
     if (!resp.ok) throw new Error(`HTTP ${resp.status} from ${url}`);
     return resp.json();
   }
+
+  async _fetchAuthed(url, options = {}, allowRefreshRetry = true) {
+    await this.ensureValidToken();
+
+    const resp = await fetch(url, this._withAuthHeaders(options));
+    if (allowRefreshRetry && isAuthFailure(resp) && this.token?.refresh_token) {
+      await this.ensureValidToken({ forceRefresh: true });
+      return fetch(url, this._withAuthHeaders(options));
+    }
+    return resp;
+  }
+
+  _withAuthHeaders(options = {}) {
+    const headers = { ...(options.headers || {}) };
+    if (this.token?.access_token) {
+      headers.Authorization = `Bearer ${this.token.access_token}`;
+    }
+    return { ...options, headers };
+  }
+}
+
+function isAuthFailure(resp) {
+  return resp.status === 401 || resp.status === 403;
 }
 
 function filenameFromURL(rawURL) {
