@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy"
+  content="default-src 'self';
+           img-src 'self' https://static.gog.com https://*.gog-statics.com https://images.gog.com https://gog-statics.com data:;
+           style-src 'self' 'unsafe-inline';
+           script-src 'self'">
+<title>GOG Loader</title>
+<style>
+/* ── Reset & base ── */
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:system-ui,sans-serif;background:#1a1a2e;color:#e0e0e0;min-height:100vh}
+a{color:#c8a951;text-decoration:none}
+.hidden{display:none!important}
+
+/* ── Header ── */
+.header{background:#16213e;border-bottom:2px solid #c8a951;padding:1rem 2rem}
+.header-inner{max-width:1340px;margin:0 auto;display:flex;align-items:center;gap:.75rem}
+.header h1{font-size:1.4rem;color:#c8a951;margin-right:auto}
+.header h1 a{color:inherit;text-decoration:none;cursor:pointer}
+.badge{background:#2e7d32;color:#a5d6a7;padding:.2rem .7rem;border-radius:4px;font-size:.8rem;font-weight:bold}
+.nav-link{color:#9e9e9e;font-size:.9rem;cursor:pointer}
+
+/* ── Home ── */
+.hero{text-align:center;padding:5rem 2rem;flex:1}
+.hero h2{font-size:2rem;color:#c8a951;margin-bottom:1rem}
+.hero p{color:#9e9e9e;margin-bottom:2.5rem;font-size:1.05rem;max-width:520px;margin-left:auto;margin-right:auto;line-height:1.6}
+.btn{display:inline-block;padding:.75rem 2rem;border-radius:6px;border:none;cursor:pointer;font-size:1rem;font-weight:600;text-decoration:none;transition:opacity .2s}
+.btn-gold{background:#c8a951;color:#1a1a2e}.btn-gold:hover{opacity:.85}
+.info-text{margin-top:2rem;color:#555;font-size:.85rem}
+
+/* ── Settings row ── */
+.settings-row{max-width:1340px;margin:0 auto;padding:1rem 1.5rem 0;display:flex;align-items:center;gap:.6rem;font-size:.85rem;color:#9e9e9e}
+.settings-row code{background:#0a0a1a;border:1px solid #2a2a4e;padding:.15rem .4rem;border-radius:3px;font-size:.82rem;color:#4db6ff;word-break:break-all}
+.settings-row .btn-sm{padding:.3rem .7rem;font-size:.78rem}
+
+/* ── Login ── */
+.container{max-width:700px;margin:2.5rem auto;padding:0 1.5rem}
+.card{background:#16213e;border:1px solid #2a2a4e;border-radius:8px;padding:1.75rem;margin-bottom:1rem}
+.card h2{color:#c8a951;font-size:1.1rem;margin-bottom:1.25rem}
+.step{display:flex;gap:1rem;margin-bottom:1.1rem;align-items:flex-start}
+.step-num{background:#c8a951;color:#1a1a2e;width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:.82rem;flex-shrink:0;margin-top:.15rem}
+.step-body{flex:1;font-size:.9rem;line-height:1.55;color:#ccc}
+.step-body strong{color:#e0e0e0}
+code{background:#0a0a1a;border:1px solid #2a2a4e;padding:.1rem .35rem;border-radius:3px;font-size:.82rem;color:#4db6ff;word-break:break-all}
+a.gog-btn{display:inline-block;margin-top:.6rem;padding:.55rem 1.4rem;background:#c8a951;color:#1a1a2e;border-radius:6px;font-weight:700;font-size:.88rem;text-decoration:none}
+a.gog-btn:hover{opacity:.85}
+.note{background:#0f1a2e;border:1px solid #2a3a5e;border-radius:6px;padding:.9rem 1.1rem;margin-top:.75rem;font-size:.83rem;color:#9ab;line-height:1.5}
+.note strong{color:#c8a951}
+hr{border:none;border-top:1px solid #2a2a4e;margin:1.25rem 0}
+textarea{width:100%;background:#0a0a1a;border:1px solid #2a2a5e;color:#e0e0e0;border-radius:6px;padding:.7rem;font-size:.85rem;font-family:monospace;resize:vertical;min-height:72px;outline:none}
+textarea:focus{border-color:#c8a951}
+.submit-row{margin-top:.7rem;display:flex;gap:.75rem;align-items:center}
+button[type=submit]{padding:.55rem 1.4rem;background:#c8a951;color:#1a1a2e;border:none;border-radius:6px;font-weight:700;font-size:.9rem;cursor:pointer}
+button[type=submit]:hover{opacity:.85}
+.error{background:#2d1b1b;border:1px solid #8b2635;color:#ef9a9a;padding:.75rem 1rem;border-radius:6px;margin-bottom:1rem;font-size:.88rem;line-height:1.5}
+a.cancel{color:#666;font-size:.85rem;cursor:pointer}
+
+/* ── Library ── */
+.library-container{max-width:1340px;margin:0 auto;padding:1.5rem}
+.toolbar{display:flex;gap:.75rem;align-items:center;flex-wrap:wrap;margin-bottom:1.25rem;background:#16213e;padding:1rem 1.25rem;border-radius:8px;border:1px solid #2a2a4e}
+.toolbar-right{margin-left:auto;color:#9e9e9e;font-size:.88rem}
+.size-loader{margin-bottom:1rem;background:#16213e;border:1px solid #2a2a4e;border-radius:8px;padding:1rem 1.2rem}
+.size-loader.complete{border-color:#2e7d32}
+.size-loader-head{display:flex;align-items:center;gap:.8rem;margin-bottom:.75rem}
+.size-loader-title{font-size:.92rem;font-weight:600;color:#e8e8f0}
+.size-loader-sub{margin-top:.18rem;color:#9e9e9e;font-size:.8rem}
+.spinner{width:18px;height:18px;border:2px solid #31415f;border-top-color:#c8a951;border-radius:50%;animation:spin .8s linear infinite;flex-shrink:0}
+.size-loader.complete .spinner{display:none}
+.progress-track{height:8px;border-radius:999px;background:#0a0a1a;overflow:hidden}
+.progress-bar{height:100%;width:0;background:linear-gradient(90deg,#c8a951,#f6d97a);transition:width .2s ease}
+input[type=search],select{background:#0f3460;border:1px solid #2a2a5e;color:#e0e0e0;padding:.45rem .85rem;border-radius:6px;font-size:.88rem;outline:none}
+input[type=search]{width:210px}input[type=search]::placeholder{color:#555}
+.btn-sm{background:#2a2a4e;color:#e0e0e0;border:1px solid #3a3a6e;padding:.45rem 1rem;border-radius:6px;font-size:.85rem;font-weight:600;cursor:pointer}.btn-sm:hover{background:#3a3a6e}
+.game-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:.8rem}
+.game-card{background:#16213e;border:1px solid #2a2a4e;border-radius:8px;padding:.9rem;display:flex;gap:.7rem;align-items:flex-start;cursor:pointer;transition:border-color .15s,background .15s;position:relative}
+.game-card:hover{border-color:#888}
+.game-card.selected{border-color:#c8a951;background:#1c1c3a}
+.game-card.backed-up{border-color:#2e7d32}
+.game-card.backed-up.selected{border-color:#c8a951}
+.game-card.filtered-out{display:none}
+.game-card input[type=checkbox]{margin-top:.15rem;flex-shrink:0;width:16px;height:16px;accent-color:#c8a951;cursor:pointer}
+.game-thumb{width:96px;height:54px;border-radius:6px;overflow:hidden;position:relative;flex-shrink:0;border:1px solid #2a2a4e;background:linear-gradient(135deg,#22314f,#111a2f)}
+.game-thumb img{width:100%;height:100%;object-fit:cover;display:block;opacity:0;transition:opacity .18s ease}
+.game-thumb.ready img{opacity:1}
+.game-thumb-fallback{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:.35rem;font-size:.58rem;letter-spacing:.06em;text-transform:uppercase;color:#8c95ab;text-align:center}
+.game-thumb.ready .game-thumb-fallback{display:none}
+.game-thumb.error{background:#10192c}
+.game-thumb.error .game-thumb-fallback{display:flex}
+.game-info{flex:1;min-width:0}
+.game-title{font-weight:600;font-size:.88rem;line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.game-size{margin-top:.35rem;color:#c8c8d8;font-size:.76rem;display:flex;align-items:center;gap:.4rem}
+.game-size .inline-spinner{display:none;width:11px;height:11px;border:2px solid #31415f;border-top-color:#4db6ff;border-radius:50%;animation:spin .8s linear infinite;flex-shrink:0}
+.game-size.loading .inline-spinner{display:inline-block}
+.game-meta{margin-top:.3rem;display:flex;gap:.3rem;flex-wrap:wrap;align-items:center}
+.os-badge{border:1px solid #333;padding:.05rem .35rem;border-radius:3px;font-size:.68rem;background:#0a0a20}
+.os-w{border-color:#0078d4;color:#4db6ff}
+.os-m{border-color:#777;color:#bbb}
+.os-l{border-color:#c84b11;color:#f48fb1}
+.backed-badge{position:absolute;top:.4rem;right:.4rem;background:#1a301a;border:1px solid #2e7d32;color:#81c784;padding:.05rem .35rem;border-radius:3px;font-size:.66rem}
+.bottom-bar{position:fixed;bottom:0;left:0;right:0;background:#16213e;border-top:1px solid #2a2a4e;padding:.9rem 2rem;z-index:100}
+.bottom-bar-inner{max-width:1340px;margin:0 auto;display:flex;align-items:center;gap:1rem}
+.sel-count{color:#9e9e9e;font-size:.9rem}
+.btn-start{background:#c8a951;color:#1a1a2e;padding:.65rem 2rem;font-size:.95rem;font-weight:700;border:none;border-radius:6px;cursor:pointer}.btn-start:hover{opacity:.85}
+.btn-start:disabled{opacity:.4;cursor:not-allowed}
+.running-notice{background:#1b2d1b;border:1px solid #2e7d32;color:#a5d6a7;padding:.75rem 1.25rem;border-radius:6px;margin-bottom:1rem;font-size:.9rem}
+.loading-msg{text-align:center;padding:4rem;color:#9e9e9e;font-size:1rem}
+
+/* ── Progress ── */
+.progress-container{max-width:880px;margin:2rem auto;padding:0 1.5rem}
+.label-row{display:flex;justify-content:space-between;font-size:.83rem;color:#9e9e9e;margin-bottom:.3rem}
+.bar-wrap{background:#0a0a1a;border-radius:4px;height:20px;overflow:hidden;margin-bottom:1rem}
+.bar{height:100%;transition:width .35s ease}
+.bar-gold{background:#c8a951}
+.bar-blue{background:#4db6ff}
+.log{background:#0a0a1a;border:1px solid #2a2a4e;border-radius:6px;padding:1rem;height:300px;overflow-y:auto;font-family:monospace;font-size:.8rem;line-height:1.5}
+.log .ok{color:#81c784}
+.log .err{color:#ef9a9a}
+.log .info{color:#9e9e9e}
+.notice{padding:1rem 1.5rem;border-radius:6px;margin-top:1rem}
+.notice-ok{background:#1a301a;border:1px solid #2e7d32;color:#a5d6a7}
+.notice-err{background:#2d1b1b;border:1px solid #8b2635;color:#ef9a9a}
+a.btn-back{display:inline-block;margin-top:1rem;padding:.6rem 1.5rem;background:#c8a951;color:#1a1a2e;border-radius:6px;font-weight:700;text-decoration:none;font-size:.9rem;cursor:pointer}
+a.btn-back:hover{opacity:.85}
+
+/* ── Error view ── */
+.err-box{background:#2d1b1b;border:1px solid #8b2635;border-radius:8px;padding:1.5rem;color:#ef9a9a}
+.err-box h2{margin-bottom:.75rem;font-size:1.1rem}
+
+@keyframes spin{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+
+<!-- ── Header ── -->
+<div class="header">
+  <div class="header-inner">
+    <h1><a id="homeLink">GOG Loader</a></h1>
+    <span class="badge hidden" id="authBadge">Connected</span>
+    <a class="nav-link hidden" id="btnLogout">Logout</a>
+  </div>
+</div>
+
+<!-- ══════════════ HOME ══════════════ -->
+<div id="view-home" class="view">
+  <div class="hero">
+    <h2>GOG Library Backup</h2>
+    <p>Connect to your GOG account, browse your game library, and back up installers and bonus content to a local directory.</p>
+    <div id="homeAuth" class="hidden">
+      <button class="btn btn-gold" id="btnViewLibrary">View My Library</button>
+    </div>
+    <div id="homeUnauth">
+      <button class="btn btn-gold" id="btnLogin">Login with GOG</button>
+      <p class="info-text">A GOG login window will open.</p>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════ LOGIN ══════════════ -->
+<div id="view-login" class="view hidden">
+  <div class="container">
+    <div class="error hidden" id="loginError"></div>
+    <div class="card">
+      <h2>Connect your GOG account</h2>
+      <p style="color:#ccc;font-size:.9rem;line-height:1.55;margin-bottom:1.25rem">
+        If the automatic login window didn't work, you can paste a token manually.
+      </p>
+
+      <form id="authForm">
+        <textarea id="authInput"
+          placeholder="https://embed.gog.com/on_login_success?origin=client&code=…
+— or —
+Authorization: Bearer eyJ..."></textarea>
+        <div class="submit-row">
+          <button type="submit">Authenticate</button>
+          <a class="cancel" id="loginCancel">Cancel</a>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════ LIBRARY ══════════════ -->
+<div id="view-library" class="view hidden">
+  <div class="settings-row">
+    <span>Backup directory:</span>
+    <code id="gamesDirLabel">./games</code>
+    <button class="btn-sm" id="btnChangeDir">Change</button>
+  </div>
+
+  <div class="library-container">
+    <div class="running-notice hidden" id="runningNotice">A backup is currently running.</div>
+
+    <div class="toolbar">
+      <input type="search" id="searchInput" placeholder="Search games…">
+      <select id="osFilter">
+        <option value="">All platforms</option>
+        <option value="w">Windows</option>
+        <option value="m">macOS</option>
+        <option value="l">Linux</option>
+      </select>
+      <button class="btn-sm" id="btnSelectAll">Select all</button>
+      <button class="btn-sm" id="btnDeselectAll">Deselect all</button>
+      <div class="toolbar-right" id="totalGames">0 games in library</div>
+    </div>
+
+    <div class="size-loader hidden" id="sizeLoader">
+      <div class="size-loader-head">
+        <div class="spinner" id="sizeSpinner"></div>
+        <div>
+          <div class="size-loader-title" id="sizeLoaderTitle">Loading game sizes…</div>
+          <div class="size-loader-sub" id="sizeLoaderSub">0 / 0 processed</div>
+        </div>
+      </div>
+      <div class="progress-track"><div class="progress-bar" id="sizeProgressBar"></div></div>
+    </div>
+
+    <div class="loading-msg hidden" id="libraryLoading">Loading library…</div>
+
+    <div class="game-grid" id="gameGrid"></div>
+
+    <div class="bottom-bar">
+      <div class="bottom-bar-inner">
+        <span class="sel-count" id="selCount">0 selected</span>
+        <button class="btn-start" id="startBtn" disabled>Start Backup</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════ PROGRESS ══════════════ -->
+<div id="view-progress" class="view hidden">
+  <div class="progress-container">
+    <div class="card">
+      <h2 id="progressTitle">Backup Progress</h2>
+
+      <div class="label-row">
+        <span id="gameLabel">Initializing…</span>
+        <span id="gameCounter"></span>
+      </div>
+      <div class="bar-wrap"><div class="bar bar-gold" id="gameBar" style="width:0%"></div></div>
+
+      <div class="label-row">
+        <span id="fileLabel">–</span>
+        <span id="fileSize"></span>
+      </div>
+      <div class="bar-wrap"><div class="bar bar-blue" id="fileBar" style="width:0%"></div></div>
+
+      <div id="noticeArea"></div>
+    </div>
+
+    <div class="card">
+      <h2>Log</h2>
+      <div class="log" id="logArea"></div>
+    </div>
+
+    <div id="doneArea"></div>
+  </div>
+</div>
+
+<!-- ══════════════ ERROR ══════════════ -->
+<div id="view-error" class="view hidden">
+  <div class="container" style="margin-top:3rem">
+    <div class="err-box">
+      <h2>Something went wrong</h2>
+      <p id="errorMessage"></p>
+    </div>
+    <a class="btn-back" id="errorBack">← Back to home</a>
+  </div>
+</div>
+
+<script src="renderer.js"></script>
+</body>
+</html>
