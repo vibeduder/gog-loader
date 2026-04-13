@@ -101,6 +101,43 @@ input[type=search]{width:210px}input[type=search]::placeholder{color:#555}
 .os-m{border-color:#777;color:#bbb}
 .os-l{border-color:#c84b11;color:#f48fb1}
 .backed-badge{position:absolute;top:.4rem;right:.4rem;background:#1a301a;border:1px solid #2e7d32;color:#81c784;padding:.05rem .35rem;border-radius:3px;font-size:.66rem}
+.backed-badge.partial{background:#2a2000;border-color:#8a6800;color:#ffd740}
+.gear-btn{position:absolute;bottom:.35rem;right:.35rem;background:none;border:1px solid #3a3a6e;border-radius:4px;color:#9e9e9e;font-size:.8rem;line-height:1;padding:.15rem .3rem;cursor:pointer;z-index:2}
+.gear-btn:hover{background:#2a2a4e;color:#e0e0e0}
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:1000;display:flex;align-items:center;justify-content:center}
+.modal-card{background:#16213e;border:1px solid #c8a951;border-radius:10px;width:520px;max-width:95vw;max-height:80vh;display:flex;flex-direction:column}
+.modal-header{display:flex;align-items:center;padding:1rem 1.25rem .75rem;border-bottom:1px solid #2a2a4e;gap:.75rem}
+.modal-title{font-weight:700;font-size:1rem;color:#c8a951;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.modal-close{background:none;border:none;color:#9e9e9e;font-size:1.4rem;cursor:pointer;padding:0 .25rem;line-height:1}
+.modal-close:hover{color:#e0e0e0}
+.modal-body{overflow-y:auto;overscroll-behavior:contain;padding:.75rem 1.25rem;flex:1}
+.fp-section{margin-bottom:.75rem}
+.fp-section-title{font-size:.75rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#9e9e9e;margin-bottom:.4rem}
+.fp-item{display:flex;align-items:center;gap:.6rem;padding:.45rem .5rem;border-radius:5px;cursor:pointer;font-size:.83rem;color:#ccc}
+.fp-item:hover{background:#1c2a40}
+.fp-item--full{background:#0e2518;border-left:3px solid #2e7d32;padding-left:.35rem}
+.fp-item--full:hover{background:#142d1e}
+.fp-item--partial{background:#1e1600;border-left:3px solid #f57c00;padding-left:.35rem}
+.fp-item--partial:hover{background:#261c00}
+.fp-item input[type=checkbox]{accent-color:#c8a951;width:14px;height:14px;flex-shrink:0;cursor:pointer}
+.fp-item-info{flex:1;min-width:0}
+.fp-item-name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fp-item-size{color:#9e9e9e;font-size:.75rem;margin-top:.1rem}
+.fp-loading{text-align:center;padding:2rem;color:#9e9e9e}
+.modal-footer{display:flex;gap:.75rem;padding:.75rem 1.25rem;border-top:1px solid #2a2a4e;justify-content:flex-end}
+.sel-size{color:#c8a951;font-size:.88rem}
+.fp-platform-bar{display:flex;align-items:center;gap:.4rem;padding:.35rem 0 .65rem;flex-wrap:wrap;border-bottom:1px solid #2a2a4e;margin-bottom:.5rem}
+.fp-platform-label{font-size:.74rem;color:#9e9e9e;margin-right:.1rem;flex-shrink:0}
+.fp-platform-btn{background:#1c2a40;border:1px solid #3a3a6e;color:#ccc;padding:.22rem .6rem;border-radius:4px;font-size:.77rem;cursor:pointer;transition:background .15s,border-color .15s}
+.fp-platform-btn:hover{background:#2a3a50}
+.fp-platform-btn.active{background:#1e2e46;border-color:#c8a951;color:#c8a951}
+.fp-backed-bar{font-size:.76rem;color:#81c784;padding:.3rem 0 .5rem;display:flex;align-items:center;gap:.4rem}
+.fp-backed-bar svg{flex-shrink:0}
+.fp-item-backed{color:#81c784;font-size:.72rem;margin-top:.15rem;display:flex;align-items:center;gap:.25rem}
+.fp-item-backed--partial{color:#ffb74d}
+.fp-file-list{margin-top:.4rem;padding-left:.2rem;display:flex;flex-direction:column;gap:.15rem}
+.fp-file-row{font-size:.72rem;color:#757575;display:flex;align-items:center;gap:.3rem}
+.fp-file-row--done{color:#81c784}
 .bottom-bar{position:fixed;bottom:0;left:0;right:0;background:#16213e;border-top:1px solid #2a2a4e;padding:.9rem 2rem;z-index:100}
 .bottom-bar-inner{max-width:1340px;margin:0 auto;display:flex;align-items:center;gap:1rem}
 .sel-count{color:#9e9e9e;font-size:.9rem}
@@ -202,6 +239,13 @@ Authorization: Bearer eyJ..."></textarea>
         <option value="m">macOS</option>
         <option value="l">Linux</option>
       </select>
+      <select id="backupFilter">
+        <option value="">All games</option>
+        <option value="needs-backup">Needs backup</option>
+        <option value="none">Not backed up</option>
+        <option value="partial">Partially backed up</option>
+        <option value="full">Fully backed up</option>
+      </select>
       <button class="btn-sm" id="btnSelectAll">Select all</button>
       <button class="btn-sm" id="btnDeselectAll">Deselect all</button>
       <div class="toolbar-right" id="totalGames">0 games in library</div>
@@ -225,6 +269,7 @@ Authorization: Bearer eyJ..."></textarea>
     <div class="bottom-bar">
       <div class="bottom-bar-inner">
         <span class="sel-count" id="selCount">0 selected</span>
+        <span class="sel-size" id="selSize"></span>
         <button class="btn-start" id="startBtn" disabled>Start Backup</button>
       </div>
     </div>
@@ -269,6 +314,21 @@ Authorization: Bearer eyJ..."></textarea>
       <p id="errorMessage"></p>
     </div>
     <a class="btn-back" id="errorBack">← Back to home</a>
+  </div>
+</div>
+
+<!-- ══════════════ FILE PICKER MODAL ══════════════ -->
+<div id="filePickerModal" class="modal-overlay hidden">
+  <div class="modal-card">
+    <div class="modal-header">
+      <span id="fpTitle" class="modal-title"></span>
+      <button id="fpClose" class="modal-close">×</button>
+    </div>
+    <div id="fpBody" class="modal-body"></div>
+    <div class="modal-footer">
+      <button class="btn-sm" id="fpCancel">Cancel</button>
+      <button class="btn-sm" id="fpSave">Save selection</button>
+    </div>
   </div>
 </div>
 

@@ -3,6 +3,9 @@
 let libraryGames = [];
 let sizeCleanup = null;
 let backupCleanup = null;
+let rawGameSizes = {};        // gameId → raw bytes (total, all files)
+let gameFileSelections = {};  // gameId → [fileId, ...] | null (null = all)
+let gameCustomSizes = {};     // gameId → bytes for current selection (set when file picker saved)
 
 // ── Initialization ──
 
@@ -31,10 +34,27 @@ function bindNavigation() {
   document.getElementById('authForm').addEventListener('submit', onAuthSubmit);
   document.getElementById('searchInput').addEventListener('input', filterGames);
   document.getElementById('osFilter').addEventListener('change', filterGames);
+  document.getElementById('backupFilter').addEventListener('change', filterGames);
   document.getElementById('btnSelectAll').addEventListener('click', () => selectAll(true));
   document.getElementById('btnDeselectAll').addEventListener('click', () => selectAll(false));
   document.getElementById('startBtn').addEventListener('click', onStartBackup);
   document.getElementById('btnChangeDir').addEventListener('click', onChangeDir);
+
+  // Game grid — event delegation (registered once; grid.innerHTML is replaced on each load)
+  document.getElementById('gameGrid').addEventListener('click', onGridClick);
+  document.getElementById('gameGrid').addEventListener('change', updateSelection);
+
+  // File picker modal
+  document.getElementById('fpClose').addEventListener('click', closeFilePicker);
+  document.getElementById('fpCancel').addEventListener('click', closeFilePicker);
+  document.getElementById('fpSave').addEventListener('click', saveFilePicker);
+
+  // Platform toggle buttons inside file picker (event delegation)
+  document.getElementById('fpBody').addEventListener('click', (e) => {
+    const btn = e.target.closest('.fp-platform-btn');
+    if (!btn) return;
+    applyPlatformFilter(btn.dataset.platform);
+  });
 }
 
 async function navigate(view, data) {
@@ -144,6 +164,10 @@ async function showLibrary() {
     /* ignore */
   }
 
+  rawGameSizes = {};
+  gameFileSelections = {};
+  gameCustomSizes = {};
+
   const grid = document.getElementById('gameGrid');
   const loading = document.getElementById('libraryLoading');
   const sizeLoader = document.getElementById('sizeLoader');
@@ -181,23 +205,23 @@ async function showLibrary() {
 function renderGameGrid(games) {
   const grid = document.getElementById('gameGrid');
   grid.innerHTML = games.map(renderGameCard).join('');
-
-  // Event delegation for card clicks and checkbox changes
-  grid.addEventListener('click', onGridClick);
-  grid.addEventListener('change', updateSelection);
-
   updateSelection();
   initThumbnails();
 }
 
 function renderGameCard(game) {
   const osData = `${game.worksOn?.Windows ? 'w' : ''}${game.worksOn?.Mac ? 'm' : ''}${game.worksOn?.Linux ? 'l' : ''}`;
+  const backedBadge = game.backedUp
+    ? `<span class="backed-badge${game.backedUp === 'partial' ? ' partial' : ''}">Backed up</span>`
+    : '';
   return `
     <div class="game-card${game.backedUp ? ' backed-up' : ''}"
          data-id="${game.id}"
          data-title="${esc(game.title)}"
-         data-os="${osData}">
-      ${game.backedUp ? '<span class="backed-badge">Backed up</span>' : ''}
+         data-os="${osData}"
+         data-backed="${game.backedUp || 'none'}">
+      ${backedBadge}
+      <button class="gear-btn" data-gear="${game.id}" title="Select files">⚙</button>
       <input type="checkbox" value="${game.id}">
       <div class="game-thumb${!game.thumbnailURL ? ' ready error' : ''}" data-thumb="${esc(game.thumbnailURL || '')}">
         <img alt="${esc(game.title)} cover" decoding="async" loading="lazy">
@@ -220,7 +244,12 @@ function renderGameCard(game) {
 
 function onGridClick(e) {
   const card = e.target.closest('.game-card');
-  if (!card || e.target.type === 'checkbox') return;
+  if (!card) return;
+  if (e.target.dataset.gear != null) {
+    showFilePicker(e.target.dataset.gear, card.dataset.title);
+    return;
+  }
+  if (e.target.type === 'checkbox') return;
   const cb = card.querySelector('input[type=checkbox]');
   cb.checked = !cb.checked;
   updateSelection();
@@ -229,12 +258,20 @@ function onGridClick(e) {
 function updateSelection() {
   const cards = document.querySelectorAll('#gameGrid .game-card');
   let count = 0;
+  let totalBytes = 0;
   cards.forEach((card) => {
     const cb = card.querySelector('input[type=checkbox]');
     card.classList.toggle('selected', cb.checked);
-    if (cb.checked) count++;
+    if (cb.checked) {
+      count++;
+      const id = card.dataset.id;
+      // Use custom computed size if the file picker was saved for this game,
+      // otherwise fall back to the raw total size from the size stream.
+      totalBytes += id in gameCustomSizes ? (gameCustomSizes[id] || 0) : (rawGameSizes[id] || 0);
+    }
   });
   document.getElementById('selCount').textContent = `${count} selected`;
+  document.getElementById('selSize').textContent = totalBytes > 0 ? `· ~${fmtBytes(totalBytes)}` : '';
   document.getElementById('startBtn').disabled = count === 0;
 }
 
@@ -250,10 +287,14 @@ function selectAll(state) {
 function filterGames() {
   const q = document.getElementById('searchInput').value.toLowerCase();
   const os = document.getElementById('osFilter').value;
+  const backup = document.getElementById('backupFilter').value;
   document.querySelectorAll('#gameGrid .game-card').forEach((card) => {
     const titleMatch = !q || (card.dataset.title || '').toLowerCase().includes(q);
     const osMatch = !os || (card.dataset.os || '').includes(os);
-    card.classList.toggle('filtered-out', !titleMatch || !osMatch);
+    const b = card.dataset.backed || 'none';
+    const backupMatch = !backup ||
+      (backup === 'needs-backup' ? b === 'none' || b === 'partial' : b === backup);
+    card.classList.toggle('filtered-out', !titleMatch || !osMatch || !backupMatch);
   });
 }
 
@@ -263,6 +304,8 @@ function onSizeEvent(data) {
     if (el) el.textContent = data.sizeLabel || 'Size unavailable';
     const wrap = document.getElementById(`size-wrap-${data.gameId}`);
     if (wrap) wrap.classList.remove('loading');
+    rawGameSizes[data.gameId] = data.rawSize || 0;
+    updateSelection();
   }
 
   const loader = document.getElementById('sizeLoader');
@@ -303,7 +346,7 @@ async function onStartBackup() {
   if (ids.length === 0) return;
 
   try {
-    await gogAPI.startBackup(ids);
+    await gogAPI.startBackup(ids, gameFileSelections, 'all');
     navigate('progress', { count: ids.length });
   } catch (err) {
     navigate('error', err.message || String(err));
@@ -370,6 +413,242 @@ function showProgress(data) {
       document.getElementById('noticeArea').innerHTML = `<div class="notice notice-err">⚠ ${escHTML(ev.message)}</div>`;
     }
   });
+}
+
+// ── File Picker ──
+
+let fpCurrentGameId = null;
+let fpCurrentDetails = null;
+
+async function showFilePicker(gameId, title) {
+  fpCurrentGameId = gameId;
+  fpCurrentDetails = null;
+
+  const modal = document.getElementById('filePickerModal');
+  document.getElementById('fpTitle').textContent = title || 'Select files';
+  document.getElementById('fpBody').innerHTML = '<div class="fp-loading">Loading file list…</div>';
+  modal.classList.remove('hidden');
+
+  try {
+    fpCurrentDetails = await gogAPI.getGameDetails(Number(gameId));
+    renderFilePicker(fpCurrentDetails, gameFileSelections[gameId]);
+
+    // Auto-apply current platform on first open (no prior selection saved).
+    if (!(gameId in gameFileSelections)) {
+      const platform = getCurrentPlatform();
+      if (platform !== 'all') {
+        applyPlatformFilter(platform); // toggles button active + checks its installers
+      }
+    }
+  } catch (err) {
+    document.getElementById('fpBody').innerHTML =
+      `<div class="fp-loading" style="color:#ef9a9a">Failed to load: ${escHTML(err.message || String(err))}</div>`;
+  }
+}
+
+function getCurrentPlatform() {
+  const p = (navigator.platform || '').toLowerCase();
+  if (p.startsWith('win')) return 'win';
+  if (p.startsWith('mac') || p.startsWith('iphone') || p.startsWith('ipad')) return 'mac';
+  if (p.includes('linux')) return 'linux';
+  return 'all';
+}
+
+function applyPlatformFilter(platform) {
+  const osAliases = { win: ['windows'], mac: ['osx', 'mac'], linux: ['linux'] };
+
+  if (platform === 'all') {
+    // "All" is a shortcut: activate every platform button and check all installer items.
+    document.querySelectorAll('#fpBody .fp-platform-btn:not([data-platform="all"])').forEach((b) =>
+      b.classList.add('active'),
+    );
+    document.querySelectorAll('#fpBody .fp-item').forEach((item) => {
+      const cb = item.querySelector('input[type=checkbox]');
+      if (!cb) return;
+      const section = item.closest('.fp-section');
+      const sectionTitle = section?.querySelector('.fp-section-title')?.textContent?.toLowerCase();
+      if (sectionTitle !== 'installers') return;
+      cb.checked = true;
+    });
+    return;
+  }
+
+  // Toggle this platform's button on/off.
+  const btn = document.querySelector(`#fpBody .fp-platform-btn[data-platform="${platform}"]`);
+  const willBeActive = !btn?.classList.contains('active');
+  if (btn) btn.classList.toggle('active', willBeActive);
+
+  const matchOS = osAliases[platform] || [];
+  document.querySelectorAll('#fpBody .fp-item').forEach((item) => {
+    const cb = item.querySelector('input[type=checkbox]');
+    if (!cb) return;
+    const section = item.closest('.fp-section');
+    const sectionTitle = section?.querySelector('.fp-section-title')?.textContent?.toLowerCase();
+    if (sectionTitle !== 'installers') return; // Leave bonus content unchanged
+
+    const itemOS = item.dataset.os || '';
+    // Only affect items that match this platform (or have no OS tag).
+    if (!itemOS || matchOS.includes(itemOS)) {
+      cb.checked = willBeActive;
+    }
+  });
+}
+
+function renderFilePicker(details, currentSelection) {
+  const osLabel = { windows: 'Win', osx: 'Mac', mac: 'Mac', linux: 'Linux' };
+  const osCls = { windows: 'os-w', osx: 'os-m', mac: 'os-m', linux: 'os-l' };
+  const backedUpFileIds = new Set((details.backedUpFileIds || []).map(String));
+
+  function isChecked(fileIds) {
+    if (!currentSelection) return true; // null = all selected
+    return fileIds.some((id) => currentSelection.includes(String(id)));
+  }
+
+  function backupState(fileIds) {
+    if (!backedUpFileIds.size || !fileIds?.length) return 'none';
+    const backedCount = fileIds.filter((id) => backedUpFileIds.has(String(id))).length;
+    if (backedCount === 0) return 'none';
+    return backedCount === fileIds.length ? 'full' : 'partial';
+  }
+  const halfSvg = '<svg width="11" height="11" viewBox="0 0 12 12" fill="none"><path d="M3 6h6" stroke="#ffb74d" stroke-width="2" stroke-linecap="round"/></svg>';
+  const missSvg = '<svg width="11" height="11" viewBox="0 0 12 12" fill="none"><circle cx="6" cy="6" r="4" stroke="#757575" stroke-width="1.5"/></svg>';
+
+  // Shows per-file breakdown for multi-file partial items so the user can see
+  // exactly which files within an installer are downloaded vs missing.
+  function fileBreakdown(fileIds, fileSizes) {
+    if (!fileSizes || fileSizes.length <= 1) return '';
+    const rows = fileSizes.map((sz, idx) => {
+      const done = backedUpFileIds.has(String(fileIds[idx]));
+      return `<div class="fp-file-row${done ? ' fp-file-row--done' : ''}">${done ? checkSvg : missSvg} ${fmtBytes(sz)}</div>`;
+    });
+    return `<div class="fp-file-list">${rows.join('')}</div>`;
+  }
+
+  const checkSvg = '<svg width="11" height="11" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="#81c784" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+  // Last backup banner
+  let html = '';
+  if (details.lastBackup) {
+    const d = new Date(details.lastBackup);
+    const label = isNaN(d) ? details.lastBackup : d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+    html += `<div class="fp-backed-bar">${checkSvg} Last backed up: ${escHTML(label)}</div>`;
+  }
+
+  // Platform quick-select buttons
+  html += '<div class="fp-platform-bar">';
+  html += '<span class="fp-platform-label">Platform:</span>';
+  html += '<button class="fp-platform-btn" data-platform="win">Windows</button>';
+  html += '<button class="fp-platform-btn" data-platform="mac">macOS</button>';
+  html += '<button class="fp-platform-btn" data-platform="linux">Linux</button>';
+  html += '<button class="fp-platform-btn" data-platform="all">All</button>';
+  html += '</div>';
+
+  if (details.installers.length > 0) {
+    html += '<div class="fp-section"><div class="fp-section-title">Installers</div>';
+    for (const inst of details.installers) {
+      const os = (inst.os || '').toLowerCase();
+      const badge = os
+        ? `<span class="os-badge ${osCls[os] || ''}">${osLabel[os] || inst.os}</span>`
+        : '';
+      const lang = inst.language ? `${inst.language} · ` : '';
+      const ver = inst.version ? `v${inst.version} · ` : '';
+      const checked = isChecked(inst.fileIds) ? 'checked' : '';
+      const ids = esc(inst.fileIds.join(','));
+      const instState = backupState(inst.fileIds);
+      const backedBadge = instState === 'full'
+        ? `<div class="fp-item-backed">${checkSvg} backed up</div>`
+        : instState === 'partial'
+        ? `<div class="fp-item-backed fp-item-backed--partial">${halfSvg} partial</div>`
+        : '';
+      html += `<label class="fp-item${instState !== 'none' ? ' fp-item--' + instState : ''}" data-os="${esc(os)}">
+        <input type="checkbox" ${checked} data-fileids="${ids}">
+        ${badge}
+        <div class="fp-item-info">
+          <div class="fp-item-name">${lang}${ver}${fmtBytes(inst.totalSize)}</div>
+          ${backedBadge}
+          ${instState === 'partial' ? fileBreakdown(inst.fileIds, inst.fileSizes) : ''}
+        </div>
+      </label>`;
+    }
+    html += '</div>';
+  }
+
+  if (details.bonusContent.length > 0) {
+    html += '<div class="fp-section"><div class="fp-section-title">Bonus content</div>';
+    for (const bonus of details.bonusContent) {
+      const checked = isChecked(bonus.fileIds) ? 'checked' : '';
+      const ids = esc(bonus.fileIds.join(','));
+      const bonusState = backupState(bonus.fileIds);
+      const backedBadge = bonusState === 'full'
+        ? `<div class="fp-item-backed">${checkSvg} backed up</div>`
+        : bonusState === 'partial'
+        ? `<div class="fp-item-backed fp-item-backed--partial">${halfSvg} partial</div>`
+        : '';
+      html += `<label class="fp-item${bonusState !== 'none' ? ' fp-item--' + bonusState : ''}">
+        <input type="checkbox" ${checked} data-fileids="${ids}">
+        <div class="fp-item-info">
+          <div class="fp-item-name">${escHTML(bonus.name)}</div>
+          <div class="fp-item-size">${fmtBytes(bonus.totalSize)}</div>
+          ${backedBadge}
+          ${bonusState === 'partial' ? fileBreakdown(bonus.fileIds, bonus.fileSizes) : ''}
+        </div>
+      </label>`;
+    }
+    html += '</div>';
+  }
+
+  if (!html) {
+    html = '<div class="fp-loading">No downloadable files found.</div>';
+  }
+
+  document.getElementById('fpBody').innerHTML = html;
+}
+
+function saveFilePicker() {
+  if (!fpCurrentGameId || !fpCurrentDetails) {
+    closeFilePicker();
+    return;
+  }
+
+  const checkboxes = document.querySelectorAll('#fpBody input[type=checkbox]');
+  const selectedIds = new Set();
+  checkboxes.forEach((cb) => {
+    if (cb.checked && cb.dataset.fileids) {
+      cb.dataset.fileids.split(',').filter(Boolean).forEach((id) => selectedIds.add(id));
+    }
+  });
+
+  const allIds = [
+    ...fpCurrentDetails.installers.flatMap((i) => i.fileIds.map(String)),
+    ...fpCurrentDetails.bonusContent.flatMap((b) => b.fileIds.map(String)),
+  ];
+
+  // null means "all" — only store explicit selection if it differs from all
+  const isAll = allIds.length > 0 && allIds.length === selectedIds.size && allIds.every((id) => selectedIds.has(id));
+  gameFileSelections[fpCurrentGameId] = isAll ? null : [...selectedIds];
+
+  // Compute the size for the current selection so updateSelection() can show it accurately.
+  let selectedSize = 0;
+  for (const inst of fpCurrentDetails.installers) {
+    if (inst.fileIds.some((id) => selectedIds.has(String(id)))) {
+      selectedSize += inst.totalSize || 0;
+    }
+  }
+  for (const bonus of fpCurrentDetails.bonusContent) {
+    if (bonus.fileIds.some((id) => selectedIds.has(String(id)))) {
+      selectedSize += bonus.totalSize || 0;
+    }
+  }
+  gameCustomSizes[fpCurrentGameId] = selectedSize;
+
+  closeFilePicker();
+  updateSelection();
+}
+
+function closeFilePicker() {
+  document.getElementById('filePickerModal').classList.add('hidden');
+  fpCurrentGameId = null;
+  fpCurrentDetails = null;
 }
 
 async function onLogout() {

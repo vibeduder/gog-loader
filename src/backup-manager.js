@@ -31,10 +31,10 @@ class BackupManager extends EventEmitter {
     }
   }
 
-  startBackup(productIDs) {
+  startBackup(productIDs, fileSelections = {}, platform = 'all') {
     if (this.running) throw new Error('backup already running');
     this.running = true;
-    this._run(productIDs)
+    this._run(productIDs, fileSelections, platform)
       .catch((err) => {
         this.emit('event', { type: 'error', message: err.message });
       })
@@ -43,14 +43,14 @@ class BackupManager extends EventEmitter {
       });
   }
 
-  async _run(productIDs) {
+  async _run(productIDs, fileSelections, platform) {
     const total = productIDs.length;
 
     for (let i = 0; i < total; i++) {
       const id = productIDs[i];
       try {
         const details = await this.client.getProductDetails(id);
-        await this._backupGame(details, i + 1, total);
+        await this._backupGame(details, i + 1, total, fileSelections[id] ?? null, platform);
       } catch (err) {
         console.error(`product ${id} details:`, err);
         this.emit('event', {
@@ -68,7 +68,7 @@ class BackupManager extends EventEmitter {
     });
   }
 
-  async _backupGame(product, gameIdx, totalGames) {
+  async _backupGame(product, gameIdx, totalGames, selectedFileIds, platform) {
     const gameDir = path.join(this.dir, sanitizeName(product.title));
     await fsp.mkdir(gameDir, { recursive: true });
 
@@ -80,6 +80,13 @@ class BackupManager extends EventEmitter {
 
     const files = [];
     for (const inst of product.downloads?.installers || []) {
+      if (platform && platform !== 'all') {
+        const instOS = (inst.os || '').toLowerCase();
+        const wantWin = platform === 'win' && instOS === 'windows';
+        const wantMac = platform === 'mac' && (instOS === 'osx' || instOS === 'mac');
+        const wantLinux = platform === 'linux' && instOS === 'linux';
+        if (!wantWin && !wantMac && !wantLinux) continue;
+      }
       for (const f of inst.files || []) {
         files.push({ file: f, totalSize: inst.total_size || 0 });
       }
@@ -90,12 +97,26 @@ class BackupManager extends EventEmitter {
       }
     }
 
-    const totalFiles = files.length;
+    // Apply per-game file selection filter.
+    // Normalize IDs to strings on both sides — the renderer stores them as strings
+    // (split from dataset.fileids) while the API may return numbers.
+    const selectionSet = selectedFileIds != null ? new Set(selectedFileIds.map(String)) : null;
+    const allFileIds = files.map((f) => String(f.file.id));
+    const filteredFiles =
+      selectionSet != null
+        ? files.filter((f) => selectionSet.has(String(f.file.id)))
+        : files;
+
+    const isPartial =
+      selectionSet != null && !allFileIds.every((id) => selectionSet.has(id));
+
+    const totalFiles = filteredFiles.length;
     const downloadedFiles = [];
+    const downloadedFileIds = [];
     const finalSizes = {};
 
     for (let fi = 0; fi < totalFiles; fi++) {
-      const entry = files[fi].file;
+      const entry = filteredFiles[fi].file;
 
       const link = await this._retry('resolve downlink', String(entry.id), () =>
         this.client.resolveDownlink(entry.downlink),
@@ -109,6 +130,7 @@ class BackupManager extends EventEmitter {
         if (this._isKnownGoodFile(link.filename, info.size, entry.size, knownSizes)) {
           console.log(`skip existing ${link.filename}`);
           downloadedFiles.push(link.filename);
+          downloadedFileIds.push(String(entry.id));
           finalSizes[link.filename] = info.size;
           continue;
         }
@@ -130,6 +152,7 @@ class BackupManager extends EventEmitter {
 
       const actualSize = await this._retry('download', link.filename, () =>
         this._downloadFile(link.url, destPath, entry.size, (downloaded, total) => {
+          if (downloaded === 0) return; // explicit bytes:0 emit above already covers this
           this.emit('event', {
             type: 'progress',
             gameIndex: gameIdx,
@@ -145,10 +168,11 @@ class BackupManager extends EventEmitter {
       );
 
       downloadedFiles.push(link.filename);
+      downloadedFileIds.push(String(entry.id));
       finalSizes[link.filename] = actualSize;
     }
 
-    await this._writeStatus(gameDir, downloadedFiles, finalSizes);
+    await this._writeStatus(gameDir, downloadedFiles, downloadedFileIds, finalSizes, isPartial);
   }
 
   async _downloadFile(cdnURL, destPath, expectedSize, onProgress) {
@@ -217,11 +241,13 @@ class BackupManager extends EventEmitter {
     throw lastErr;
   }
 
-  async _writeStatus(gameDir, files, fileSizes) {
+  async _writeStatus(gameDir, files, fileIds, fileSizes, partial = false) {
     const status = {
       last_backup: new Date().toISOString(),
       files,
+      file_ids: fileIds,
       file_sizes: fileSizes,
+      ...(partial ? { partial: true } : {}),
     };
     await fsp.writeFile(
       path.join(gameDir, '.backup-status.json'),

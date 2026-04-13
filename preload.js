@@ -7,7 +7,9 @@ contextBridge.exposeInMainWorld('gogAPI', {
   submitAuth: (input) => ipcRenderer.invoke('submit-auth', input),
   getLibrary: () => ipcRenderer.invoke('get-library'),
   streamLibrarySizes: (gameIds) => ipcRenderer.invoke('stream-library-sizes', gameIds),
-  startBackup: (ids) => ipcRenderer.invoke('start-backup', ids),
+  getGameDetails: (id) => ipcRenderer.invoke('get-game-details', id),
+  startBackup: (ids, fileSelections, platform) =>
+    ipcRenderer.invoke('start-backup', { ids, fileSelections, platform }),
   selectDirectory: () => ipcRenderer.invoke('select-directory'),
   logout: () => ipcRenderer.invoke('logout'),
   getSettings: () => ipcRenderer.invoke('get-settings'),

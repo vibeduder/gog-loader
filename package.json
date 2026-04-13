@@ -1,6 +1,6 @@
 {
   "name": "gog-loader",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "GOG Library Backup Tool",
   "productName": "GOG Loader",
   "main": "main.js",

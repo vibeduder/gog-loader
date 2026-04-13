@@ -178,11 +178,39 @@ function registerIPC() {
   ipcMain.handle('get-library', async () => {
     const products = await client.getLibrary();
     const games = products.filter((p) => p.isGame);
-    return games.map((p) => ({
-      ...p,
-      backedUp: manager.gameBackupStatus(p.title) !== null,
-      thumbnailURL: buildThumbnailURL(p.image),
-    }));
+    return games.map((p) => {
+      const status = manager.gameBackupStatus(p.title);
+      return {
+        ...p,
+        backedUp: status ? (status.partial ? 'partial' : 'full') : false,
+        thumbnailURL: buildThumbnailURL(p.image),
+      };
+    });
+  });
+
+  ipcMain.handle('get-game-details', async (_event, id) => {
+    const details = await client.getProductDetails(id);
+    const backupStatus = manager.gameBackupStatus(details.title || '');
+    const backedUpFileIds = await resolveBackedUpFileIds(details, backupStatus);
+    return {
+      installers: (details.downloads?.installers || []).map((inst) => ({
+        os: inst.os || '',
+        language: inst.language_full || inst.language || '',
+        version: inst.version || '',
+        totalSize: inst.total_size || 0,
+        fileIds: (inst.files || []).map((f) => f.id),
+        fileSizes: (inst.files || []).map((f) => f.size || 0),
+      })),
+      bonusContent: (details.downloads?.bonus_content || []).map((bonus) => ({
+        name: bonus.name || bonus.type || 'Bonus content',
+        type: bonus.type || '',
+        totalSize: bonus.total_size || 0,
+        fileIds: (bonus.files || []).map((f) => f.id),
+        fileSizes: (bonus.files || []).map((f) => f.size || 0),
+      })),
+      backedUpFileIds,
+      lastBackup: backupStatus?.last_backup || null,
+    };
   });
 
   ipcMain.handle('stream-library-sizes', async (_event, gameIds) => {
@@ -196,9 +224,11 @@ function registerIPC() {
       await Promise.all(
         batch.map(async (id) => {
           let sizeLabel = 'Size unavailable';
+          let rawSize = 0;
           try {
             const details = await client.getProductDetails(id);
-            sizeLabel = formatBytes(totalDownloadSize(details));
+            rawSize = totalDownloadSize(details);
+            sizeLabel = formatBytes(rawSize);
           } catch {
             /* keep default label */
           }
@@ -207,6 +237,7 @@ function registerIPC() {
             mainWindow.webContents.send('size-event', {
               gameId: id,
               sizeLabel,
+              rawSize,
               completed,
               total,
             });
@@ -220,12 +251,12 @@ function registerIPC() {
     }
   });
 
-  ipcMain.handle('start-backup', (_event, ids) => {
+  ipcMain.handle('start-backup', (_event, { ids, fileSelections, platform } = {}) => {
     if (!Array.isArray(ids) || ids.length === 0) throw new Error('no games selected');
     if (!client.isAuthenticated()) throw new Error('not authenticated');
     const validIds = ids.filter((id) => typeof id === 'number' && Number.isFinite(id));
     if (validIds.length === 0) throw new Error('no valid game IDs');
-    manager.startBackup(validIds);
+    manager.startBackup(validIds, fileSelections || {}, platform || 'all');
     return { started: true, count: validIds.length };
   });
 
@@ -270,6 +301,40 @@ function extractBearerToken(raw) {
     if (token) return token;
   }
   return '';
+}
+
+async function resolveBackedUpFileIds(details, backupStatus) {
+  if (!backupStatus) return [];
+
+  const storedIds = Array.isArray(backupStatus.file_ids) ? backupStatus.file_ids : [];
+  if (storedIds.length > 0) {
+    return [...new Set(storedIds.map(String))];
+  }
+
+  const storedFiles = Array.isArray(backupStatus.files) ? backupStatus.files : [];
+  if (storedFiles.length === 0) return [];
+
+  const backedUpFiles = new Set(storedFiles.map(String));
+  const entries = collectDownloadEntries(details);
+  const matchedIds = await Promise.all(
+    entries.map(async (entry) => {
+      const link = await client.resolveDownlink(entry.downlink);
+      return backedUpFiles.has(link.filename) ? String(entry.id) : null;
+    }),
+  );
+
+  return [...new Set(matchedIds.filter(Boolean))];
+}
+
+function collectDownloadEntries(product) {
+  const entries = [];
+  for (const inst of product.downloads?.installers || []) {
+    for (const file of inst.files || []) entries.push(file);
+  }
+  for (const bonus of product.downloads?.bonus_content || []) {
+    for (const file of bonus.files || []) entries.push(file);
+  }
+  return entries;
 }
 
 function extractCode(raw) {
